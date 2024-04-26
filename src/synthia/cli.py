@@ -27,6 +27,18 @@ def serve(
     max_tokens: int = 1000,
     iteration_interval: int = 1200,
     ):
+    """
+    Serves the Synthia validator by setting up the necessary configurations and starting the validation loop.
+
+    Args:
+        commune_key (str): The name of the key present in `~/.commune/key`.
+        temperature (float, optional): The temperature value for text generation. Defaults to 0.2.
+        max_tokens (int, optional): The maximum number of tokens in the generated text. Defaults to 1000.
+        iteration_interval (int, optional): The interval in seconds between each validation iteration. Defaults to 1200.
+
+    Returns:
+        None
+    """
     keypair = classic_load_key(commune_key) # type: ignore
     settings = ValidatorSettings(
         temperature=temperature,

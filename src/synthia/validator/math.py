@@ -1,6 +1,15 @@
 import math
 
 def sigmoid(x: float):
+    """
+    Calculates the sigmoid function of a given number.
+
+    Parameters:
+        x (float): The input number.
+
+    Returns:
+        float: The sigmoid function value.
+    """
     return 1 / (1 + math.exp(-x))
 
 def threshold_sigmoid_reward_distribution(score_dict: dict[int, float]) -> dict[int, float]:

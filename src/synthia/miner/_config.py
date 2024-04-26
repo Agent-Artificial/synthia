@@ -1,6 +1,7 @@
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel
 
-class AnthropicSettings(BaseSettings):
+
+class AnthropicSettings(BaseModel):
     api_key: str
     model: str = "claude-3-opus-20240229"
     max_tokens: int = 1000

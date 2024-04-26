@@ -13,7 +13,10 @@ class Criteria:
 
 
 def get_fields() -> list[str]:
-    fields = [
+    """
+    Returns a list of fields related to various academic disciplines.
+    """
+    return [
         "Higher Order Logic",
         "Complexity theory",
         "Fractal information theory",
@@ -316,11 +319,15 @@ def get_fields() -> list[str]:
         "Teleodynamics",
     ]
 
-    return fields
-
 
 def get_explination_types() -> list[str]:
-    types = [
+    """
+    Returns a list of explanation types.
+
+    :return: A list of strings representing different types of explanations.
+    :rtype: list[str]
+    """
+    return [
         "causal",
         "by example",
         "analogies",
@@ -334,12 +341,17 @@ def get_explination_types() -> list[str]:
         "storytelling",
         "from first principles",
     ]
-    return types
 
 
 def get_subject_types() -> list[str]:
+    """
+    Returns a list of subject types.
 
-    types = [
+    :return: A list of strings representing different types of subjects.
+    :rtype: list[str]
+    """
+
+    return [
         "phenomena",
         "process",
         "principles",
@@ -350,11 +362,13 @@ def get_subject_types() -> list[str]:
         "patterns",
         "trends",
     ]
-    return types
 
 
 def get_levels():
-    esotricity = [
+    """
+    Returns a list of different levels ranging from "slight" to "very high".
+    """
+    return [
         "slight",
         "mild",
         "tangible",
@@ -367,11 +381,15 @@ def get_levels():
         "very high",
     ]
 
-    return esotricity
-
 
 def get_target_audience():
-    audiences = [
+    """
+    Returns a list of target audiences for educational content.
+
+    :return: A list of strings representing different target audiences.
+    :rtype: list[str]
+    """
+    return [
         "middle school student",
         "high school student",
         "layperson",
@@ -388,10 +406,17 @@ def get_target_audience():
         "lead professor",
     ]
 
-    return audiences
-
 
 def explanation_prompt() -> tuple[str, Criteria]:
+    """
+    Generates a prompt for a user to pick a specific subject in a random subject type with a random specificity level of esotericity in a random field, 
+    that they consider interesting and provide a insightful semantically dense explanation, targetting a random target audience. 
+    The user's goal is their comprehension of the explanation, according to their background expertise. The user follows a random abstraction level and a random detail level of detail. 
+    The user starts by titling the subject they've picked in quotation marks.
+
+    Returns:
+        tuple[str, Criteria]: A tuple containing the generated prompt and a Criteria object containing the subject type, specificity, target audience, detail level, abstraction level, and field.
+    """
     subject_types = random.choice(get_subject_types())
     specificity = random.choice(get_levels())
     target_audiences = random.choice(get_target_audience())
@@ -421,12 +446,16 @@ def explanation_prompt() -> tuple[str, Criteria]:
 
 
 def get_miner_prompt(criteria: Criteria, sample_subject: str, sample_length: int):
-    prompt = (
-        f"You are a top expert in the field of {criteria.field} with deep knowledge on "
-        f"the subject {[sample_subject]}. Provide an insightful semantically dense "
-        f"explanation of the {[sample_subject]} that will be read by a {[criteria.target_audience]}. "
-        "Your goal is their comprehension of the explanation, according to their "
-        f"background expertise. Follow a {[criteria.abstraction]} level of abstraction and a {[criteria.detail]} "
-        f"level of detail. Target a length of approximately [{sample_length}] words."
-    )
-    return prompt
+    """
+    Generates a prompt for a miner to provide an insightful and semantically dense explanation of a given subject.
+
+    Args:
+        criteria (Criteria): The criteria for the miner's expertise in the field and the target audience.
+        sample_subject (str): The subject of the explanation.
+        sample_length (int): The target length of the explanation in words.
+
+    Returns:
+        str: The generated prompt for the miner.
+
+    """
+    return f"You are a top expert in the field of {criteria.field} with deep knowledge on the subject {[sample_subject]}. Provide an insightful semantically dense explanation of the {[sample_subject]} that will be read by a {[criteria.target_audience]}. Your goal is their comprehension of the explanation, according to their background expertise. Follow a {[criteria.abstraction]} level of abstraction and a {[criteria.detail]} level of detail. Target a length of approximately [{sample_length}] words."

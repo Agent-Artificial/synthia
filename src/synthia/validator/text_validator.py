@@ -3,9 +3,10 @@ import concurrent.futures
 import re
 import time
 from functools import partial
-
+from typing_extensions import List, Dict
 import numpy as np
 import requests
+from requests.exceptions import HTTPError
 from communex.client import CommuneClient  # type: ignore
 from communex.module.client import ModuleClient  # type: ignore
 from communex.module.module import Module  # type: ignore
@@ -15,7 +16,7 @@ from fuzzywuzzy import fuzz  # type: ignore
 from substrateinterface import Keypair  # type: ignore
 
 from ..miner._config import AnthropicSettings
-from ..miner.anthropic import AnthropicModule
+from ..miner.anthropic_miner import AnthropicModule
 from ..utils import retry, log
 from ._config import ValidatorSettings
 from .generate_data import InputGenerator
@@ -121,14 +122,26 @@ def get_synthia_netuid(clinet: CommuneClient, subnet_name: str = "synthia"):
 
 
 def get_ip_port(modules_adresses: dict[int, str]):
+    """
+    Retrieves the IP address and port for each module in the given dictionary of module addresses.
+    
+    Args:
+        modules_adresses (dict[int, str]): A dictionary mapping module IDs to their addresses.
+        
+    Returns:
+        dict[int, list[str]]: A dictionary mapping module IDs to a list containing the IP address and port.
+        If the address does not contain an IP address and port, the module ID is not included in the returned dictionary.
+    """
     filtered_addr = {id: extract_address(addr) for id, addr in modules_adresses.items()}
-    ip_port = {
-        id: x.group(0).split(":") for id, x in filtered_addr.items() if x is not None
+    return {
+        id: x.group(0).split(":")
+        for id, x in filtered_addr.items()
+        if x is not None
     }
-    return ip_port
 
+from src.synthia.miner.anthropic_miner import AnthropicModule
 
-class TextValidator(Module):
+class TextValidator(AnthropicModule):
     """A class for validating text data using a Synthia network.
 
     This class provides methods for generating questions and answers, scoring miner
@@ -185,8 +198,7 @@ class TextValidator(Module):
         Returns:
             A list of module addresses as strings.
         """
-        module_addreses = client.query_map_address(netuid)
-        return module_addreses
+        return client.query_map_address(netuid)
 
     def _get_validation_dataset(self, settings: ValidatorSettings):
         claude_settings = AnthropicSettings()  # type: ignore
@@ -205,25 +217,22 @@ class TextValidator(Module):
         questions_age = time.time()
         return dataset, criteria, questions_age
 
-    def _get_miner_prediction(
+    async def _get_miner_prediction(
         self,
         question: str,
         miner_info: tuple[list[str], Ss58Address],
-    ) -> str | None:
+    ) -> str:
         connection, miner_key = miner_info
         module_ip, module_port = connection
         client = ModuleClient(module_ip, int(module_port), self.key)
         try:
-            miner_answer = asyncio.run(
-                client.call("generate", miner_key, {"prompt": question}, timeout=60)
-            )
-            miner_answer = miner_answer["answer"]
-
-        except Exception as e:
+            miner_answer: Dict[str, str] = await client.call("generate", miner_key, timeout=60, kwargs={"prompt": question})  # type: ignore
+            return miner_answer["answer"] or ""  # type: ignore
+        except HTTPError as e:
             log(f"Miner {module_ip}:{module_port} failed to generate an answer")
             print(e)
-            miner_answer = None
-        return miner_answer
+            return ""
+
 
     def _get_unit_euclid_distance(
         self, embedded_miner_answer: list[float], embbeded_val_answer: list[float]
@@ -235,13 +244,17 @@ class TextValidator(Module):
         return float(normalized_distance)  # i hate python's type system
 
     def _score_miner(
-        self, miner_answer: str | None, embbeded_val_answer: list[float]
+        self, miner_answer: str | None, embedded_val_answer: list[float]
     ) -> float:
+        if not embedded_val_answer:
+            return 0
         if not miner_answer:
             return 0
-        embedded_miner_answer = self.embedder.get_embedding(miner_answer)
+        embedded_miner_answer: List[float] = self.embedder.get_embedding(miner_answer)
+        if not embedded_miner_answer:
+            return 0
         normalized_distance = self._get_unit_euclid_distance(
-            embedded_miner_answer, embbeded_val_answer
+            embedded_val_answer, embedded_miner_answer
         )
         return 1 - normalized_distance
 
@@ -264,14 +277,15 @@ class TextValidator(Module):
         miner_answer: str,
         score: float,
     ):
-        hf_data: dict[str, str] = {}
-        hf_data["field"] = criteria.field
-        hf_data["subject"] = subject
-        hf_data["target"] = criteria.target_audience
-        hf_data["detail"] = criteria.detail
-        hf_data["abstraction"] = criteria.abstraction
-        hf_data["explanation"] = miner_answer
-        hf_data["score"] = str(score)
+        hf_data: dict[str, str] = {
+            "field": criteria.field,
+            "subject": subject,
+            "target": criteria.target_audience,
+            "detail": criteria.detail,
+            "abstraction": criteria.abstraction,
+            "explanation": miner_answer,
+            "score": str(score),
+        }
         return hf_data
 
     async def validate_step(
@@ -299,10 +313,8 @@ class TextValidator(Module):
 
         modules_filtered_address = get_ip_port(modules_adresses)
         for module_id in modules_keys.keys():
-            module_addr = modules_filtered_address.get(module_id, None)
-            if not module_addr:
-                continue
-            modules_info[module_id] = (module_addr, modules_keys[module_id])
+            if module_addr := modules_filtered_address.get(module_id, None):
+                modules_info[module_id] = (module_addr, modules_keys[module_id])
 
         response_cache: list[str] = []
         score_dict: dict[int, float] = {}
@@ -320,15 +332,15 @@ class TextValidator(Module):
             it = executor.map(get_miner_prediction, modules_info.values())
             miner_answers = [*it]
         for uid, miner_response in zip(modules_info.keys(), miner_answers):
-            miner_answer = miner_response
-            if not miner_answer:
+            if not await miner_response:
                 log("Skipping miner that didn't answer")
                 continue
-            score = self._score_miner(miner_answer, embedded_val_answer)
+            miner_answer = miner_response
+            score = self._score_miner( await miner_answer, embedded_val_answer)
             for answer in response_cache:
                 similarity = fuzz.ratio(answer, miner_answer)  # type: ignore
                 log(f"similarity: {similarity}")
-            response_cache.append(miner_answer)
+            response_cache.append(await miner_answer)
 
             time.sleep(0.5)
             # score has to be lower or eq to 1, as one is the best score
@@ -337,14 +349,14 @@ class TextValidator(Module):
             hf_data = self._to_hf_data(
                 criteria,
                 subject,
-                miner_answer,
+                miner_answer, # type: ignore
                 score,
             )
             hf_data_list.append(hf_data)
         if not score_dict:
             log("No miner managed to give a valid answer")
             return []
-        _ = set_weights(score_dict, self.netuid, self.client, self.key)
+        set_weights(score_dict, self.netuid, self.client, self.key)
 
         return hf_data_list
 
@@ -364,9 +376,9 @@ class TextValidator(Module):
 
                 _ = asyncio.run(
                     self.upload_client.call(
-                        "upload_to_hugging_face",
-                        hf_uploader_ss58,
-                        upload_dict,
+                        fn=hf_uploader_ss58,
+                        params = upload_dict,
+                        timeout=50
                     )
                 )
                 log("UPLOADED DATA")
@@ -383,8 +395,7 @@ class TextValidator(Module):
         hf_ss58 = check_ss58_address(settings.hf_uploader_ss58)
         while True:
             start_time = time.time()
-            db = asyncio.run(self.validate_step(settings, self.netuid))
-            if db:
+            if db := asyncio.run(self.validate_step(settings, self.netuid)):
                 self.upload_data(db, hf_ss58)
 
             elapsed = time.time() - start_time

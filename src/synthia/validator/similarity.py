@@ -1,13 +1,15 @@
-from typing import Protocol
 from dataclasses import dataclass
-from typing import Any
-
-from pydantic_settings import BaseSettings
-import openai
+from typing_extensions import Any, List, Protocol
+from pydantic import BaseModel
+from openai import OpenAI
 import numpy
 from transformers import pipeline, Pipeline  # type: ignore
-
 from ..utils import log
+from dotenv import load_dotenv
+
+load_dotenv()
+
+openai = OpenAI()
 
 
 def _do_debug():  # type: ignore
@@ -42,7 +44,7 @@ examples = [
 ]
 
 
-class OpenAISettings(BaseSettings):
+class OpenAISettings(BaseModel):
     api_key: str
 
     class Config:
@@ -72,14 +74,23 @@ class Distancer(Protocol):
 
 
 class OpenAIEmbedder(Embedder):
+    openai_settings: OpenAISettings
+    model: str
+    client: OpenAI
     def __init__(
-        self, openai_settings: OpenAISettings, model: str = "text-embedding-3-small"
+        self,
+        openai_config: OpenAISettings,
+        model: str = "text-embedding-3-small"
     ):
-        self.openai_settings = openai_settings
+        self.openai_settings = openai_config
         self.model = model
-        self.client = openai.OpenAI(api_key=self.openai_settings.api_key)
+        self.client = openai
+        openai.api_key = self.openai_settings.api_key
 
-    def get_embedding(self, input: str):
+    def get_embedding(
+        self, 
+        input: str
+        ) -> List[float]:
         response = self.client.embeddings.create(model=self.model, input=input)
         embedding = response.data[0].embedding
         return embedding
@@ -120,8 +131,7 @@ def get_classifier() -> Pipeline:
         Pipeline: The classifier pipeline using the selected model.
     """
     selected_model = "madhurjindal/autonlp-Gibberish-Detector-492513457"
-    classifier = pipeline("text-classification", model=selected_model)
-    return classifier
+    return pipeline("text-classification", model=selected_model)
 
 
 def euclidean_distance(list_1: list[float], list_2: list[float]) -> float:

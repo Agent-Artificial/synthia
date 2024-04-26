@@ -2,9 +2,10 @@ import sys
 import random
 from time import sleep
 import time
-from typing import Callable, TypeVar, ParamSpec, Literal, Any
+from typing_extensions import Callable, TypeVar, ParamSpec, Literal, Any, Optional
 import datetime
 from functools import wraps
+from pydantic import decorator
 
 T = TypeVar("T")
 T1 = TypeVar("T1")
@@ -28,8 +29,7 @@ def timeit(func: Callable[P, R]):
 
 def iso_timestamp_now() -> str:
     now = datetime.datetime.now(tz=datetime.timezone.utc)
-    iso_now = now.isoformat()
-    return iso_now
+    return now.isoformat()
 
 
 def log(
@@ -40,28 +40,60 @@ def log(
         file: Any | None = None,
         flush: Literal[False] = False
     ):
-    print(f"[{iso_timestamp_now()}] " + msg, *values, sep=sep, end=end, file=file, flush=flush)
+    print(
+        f"[{iso_timestamp_now()}] {msg}",
+        *values,
+        sep=sep,
+        end=end,
+        file=file,
+        flush=flush,
+    )
+
+class RetryException(Exception):
+    """An exception that can be retried."""
+    pass
 
 
-def retry(max_retries: int | None, retry_exceptions: list[type]):
+@decorator.decorator(retry=RetryException)
+def retry(
+    max_retries: Optional[int]= None,
+    func: Optional[Callable[P, T]]= None
+    ) -> object:
+    """
+    Retry a function if it raises one of the specified exceptions.
+
+    The decorated function should not return None.
+    """
     assert max_retries is None or max_retries > 0
+    if not func:
+        raise ValueError("'func' must be provided")
 
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        def wrapper(*args: P.args, **kwargs: P.kwargs):
-            max_retries__ = max_retries or sys.maxsize  # TODO: fix this ugly thing
-            for tries in range(max_retries__ + 1):
+    @wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            max_retries_ = max_retries or 1
+            for _ in range(max_retries_ + 1):
                 try:
-                    result = func(*args, **kwargs)
-                    return result
+                    if isinstance(func, Callable):
+                        result: Optional[T] = func(retry=RetryException, **args, **kwargs)  # type: ignore
+                        assert result is not None, f"func '{func.__name__}' returned None"
+                    else:
+                        raise ValueError(f"'func' is not callable: {func}")
+                    return result  # type: ignore
                 except Exception as e:
-                    if any(isinstance(e, exception_t) for exception_t in retry_exceptions):
-                        func_name = func.__name__
-                        log(f"An exception occurred in '{func_name} on try {tries}': {e}, but we'll retry.")
-                        if tries < max_retries__:
-                            delay = (1.4 ** tries) + random.uniform(0, 1)
-                            sleep(delay)
-                            continue
-                    raise e
-            raise Exception("Unreachable")
-        return wrapper
-    return decorator
+                    log(
+                        f"An exception occurred in '{func.__name__}': {e}, "
+                        f"but we'll retry (try {_ + 1} of {max_retries_})."
+                    )
+                    delay = 1.4 ** _ + random.uniform(0, 1)
+                    sleep(delay)
+                    continue
+            func_name = func.__name__
+            raise Exception(
+                f"The function '{func_name}' failed {max_retries_} times. "
+                f"Please check for bugs such as NullPointerException, "
+                f"unhandled exceptions, and more."
+            ) from None
+
+    return wrapper
+
+
